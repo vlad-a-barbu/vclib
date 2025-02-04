@@ -1,14 +1,15 @@
 module S = Scheduler
 
-let rec handler fd create_response =
+let handler fd create_response =
   let finally () = Unix.close fd in
-  Fun.protect ~finally
-  @@ fun () ->
-  match Tcp.read_nb fd with
-  | Error WouldBlock ->
-    S.yield ();
-    handler fd create_response
-  | Ok request -> Tcp.write fd @@ create_response request
+  let rec go fd create_response =
+    match Tcp.read_nb fd with
+    | Error WouldBlock ->
+      S.yield ();
+      go fd create_response
+    | Ok request -> create_response request |> Tcp.write fd
+  in
+  Fun.protect ~finally @@ fun () -> go fd create_response
 ;;
 
 let serve ?(port = 3000) ?(backlog = 10) create_response =

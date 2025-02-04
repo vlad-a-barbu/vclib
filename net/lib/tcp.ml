@@ -17,7 +17,7 @@ let read ?(buff_len = 0x1000) fd =
       let chunk = Bytes.sub buff 0 n in
       go (chunk :: acc))
   in
-  Bytes.concat Bytes.empty @@ go []
+  go [] |> Bytes.(concat empty)
 ;;
 
 type read_nb_error = WouldBlock
