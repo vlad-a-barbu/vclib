@@ -45,13 +45,14 @@ let run_tests tests =
 
 let json_of_string_tests () =
   let open Parsers.Json in
-  let json str = fun () -> of_string str in
-  [ { name = "Integer"; fn = json "3"; expected = Number (Int 3); to_string = show }
-  ; { name = "Float"; fn = json "3.33"; expected = Number (Float 3.33); to_string = show }
-  ; { name = "String"
-    ; fn = json "\"works\""
-    ; expected = String "works"
-    ; to_string = show
+  let is_json str = fun () -> is_valid str in
+  [ { name = "Integer"; fn = is_json "3"; expected = true; to_string = string_of_bool }
+  ; { name = "Float"; fn = is_json "3.33"; expected = true; to_string = string_of_bool }
+  ; { name = "String"; fn = is_json "\"a\""; expected = true; to_string = string_of_bool }
+  ; { name = "Invalid string"
+    ; fn = is_json "\"a"
+    ; expected = false
+    ; to_string = string_of_bool
     }
   ]
 ;;

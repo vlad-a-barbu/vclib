@@ -47,7 +47,7 @@ module State = struct
     ; pos : int
     }
 
-  let create str = { str; len = String.length str; pos = 0 }
+  let init str = { str; len = String.length str; pos = 0 }
 
   let next state =
     if state.pos + 1 = state.len then None else Some { state with pos = state.pos + 1 }
@@ -130,4 +130,22 @@ module Parse = struct
   ;;
 end
 
-let of_string _str = String "todo"
+let parsers = [ Parse.string; Parse.number; Parse.whitespace ]
+
+let is_valid str =
+  let open State in
+  let apply state parser =
+    let next = parser state in
+    if next.pos = state.pos then None else Some next
+  in
+  let rec go state =
+    if state.pos = state.len
+    then true
+    else (
+      let apply = apply state in
+      match List.find_map apply parsers with
+      | Some next -> go next
+      | None -> false)
+  in
+  go (init str)
+;;
