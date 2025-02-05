@@ -48,21 +48,28 @@ module State = struct
     }
 
   let init str = { str; len = String.length str; pos = 0 }
+  let next state = { state with pos = state.pos + 1 }
 
-  let next state =
-    if state.pos + 1 = state.len then None else Some { state with pos = state.pos + 1 }
+  let curr state =
+    try
+      let c = String.get state.str state.pos in
+      Some c
+    with
+    | Invalid_argument _ -> None
   ;;
 
-  let curr state = String.get state.str state.pos
-  let prev state = String.get state.str (state.pos - 1)
+  let prev state =
+    try
+      let c = String.get state.str (state.pos - 1) in
+      Some c
+    with
+    | Invalid_argument _ -> None
+  ;;
 
   let accept state cond =
     let rec go state =
       match curr state with
-      | c when cond c ->
-        (match next state with
-         | None -> state
-         | Some next -> go next)
+      | Some c when cond c -> go @@ next state
       | _ -> state
     in
     go state
@@ -71,27 +78,19 @@ module State = struct
   let accept_memo (type k v)
     : t -> ?memo:(k, v) Memo.t -> ((k, v) Memo.t -> char -> (k, v) Memo.t * bool) -> t
     =
-    fun state ?memo cond ->
-    let memo =
-      match memo with
-      | Some x -> x
-      | None -> Memo.init ()
+    fun state ?(memo = Memo.init ()) cond ->
+    let rec go memo state =
+      match curr state with
+      | None -> state
+      | Some c ->
+        let memo, accepted = cond memo c in
+        if not accepted then state else go memo @@ next state
     in
-    let rec go state memo =
-      let c = curr state in
-      let memo, accepted = cond memo c in
-      if not accepted
-      then state
-      else (
-        match next state with
-        | None -> state
-        | Some next -> go next memo)
-    in
-    go state memo
+    go memo state
   ;;
 end
 
-module Parse = struct
+module Accept = struct
   let whitespace state =
     State.accept state
     @@ function
@@ -115,7 +114,9 @@ module Parse = struct
   let string state =
     let memo = Memo.of_list [ '"', 0 ] in
     let quote () =
-      if State.prev state = '\\' then memo else Memo.update memo '"' (fun x -> x + 1)
+      match State.prev state with
+      | Some '\\' -> memo
+      | _ -> Memo.update memo '"' (fun x -> x + 1)
     in
     State.accept_memo ~memo state
     @@ fun memo -> function
@@ -130,13 +131,14 @@ module Parse = struct
   ;;
 end
 
-let parsers = [ Parse.string; Parse.number; Parse.whitespace ]
+let parsers = Accept.[ string; number; whitespace ]
 
 let is_valid str =
   let open State in
   let apply state parser =
-    let next = parser state in
-    if next.pos = state.pos then None else Some next
+    match parser state with
+    | next when next.pos = next.len || next.pos > state.pos -> Some next
+    | _ -> None
   in
   let rec go state =
     if state.pos = state.len

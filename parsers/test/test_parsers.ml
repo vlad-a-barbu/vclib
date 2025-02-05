@@ -49,6 +49,11 @@ let json_of_string_tests () =
   [ { name = "Integer"; fn = is_json "3"; expected = true; to_string = string_of_bool }
   ; { name = "Float"; fn = is_json "3.33"; expected = true; to_string = string_of_bool }
   ; { name = "String"; fn = is_json "\"a\""; expected = true; to_string = string_of_bool }
+  ; { name = "Invalid number"
+    ; fn = is_json "1abc"
+    ; expected = false
+    ; to_string = string_of_bool
+    }
   ; { name = "Invalid string"
     ; fn = is_json "\"a"
     ; expected = false
@@ -61,5 +66,5 @@ let () =
   print_endline "";
   json_of_string_tests ()
   |> run_tests
-  |> List.iteri @@ fun i msg -> Printf.printf "%d) %s\n\n%!" i msg
+  |> List.iteri @@ fun i msg -> Printf.printf "%d) %s\n\n%!" (i + 1) msg
 ;;
