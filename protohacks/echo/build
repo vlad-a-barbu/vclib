@@ -1,2 +1,3 @@
 #!/bin/sh
-cc -Wall -Wextra -g -o main main.c
+cc -Wall -Wextra -g $1 -o main main.c
+leaks -atExit -- ./main
