@@ -64,28 +64,44 @@ void vb_darray_push(struct vb_darray *darray, const char *ptr, size_t len)
     darray->len += len;
 }
 
-// todo: err handling
-int listen_tcp()
+int listen_tcp(int *result)
 {
     int sfd = socket(PF_INET, SOCK_STREAM, 0);
+    if (sfd == -1)
+        return -1;
+
     char reuse_addr = 1;
-    setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr));
+    if (setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr)) != 0)
+        return -1;
+
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = PF_INET;
     hints.ai_socktype = SOCK_STREAM;
     struct addrinfo *addr;
-    getaddrinfo("127.0.0.1", PORT, &hints, &addr);
+    if (getaddrinfo("127.0.0.1", PORT, &hints, &addr) != 0)
+        return -1;
+
     if (bind(sfd, addr->ai_addr, addr->ai_addrlen) != 0)
-        perror("bind");
+        return -1;
     freeaddrinfo(addr);
-    listen(sfd, 10);
+
+    if (listen(sfd, 10) != 0)
+        return -1;
     printf("listening on port %s\n", PORT);
+
+    *result = sfd;
+    return 0;
 }
 
 int main()
 {
-    int sfd = listen_tcp();
+    int sfd;
+    if (listen_tcp(&sfd) != 0)
+    {
+        perror("listen_tcp");
+        return 1;
+    }
 
     do
     {
