@@ -1,3 +1,8 @@
-#!/bin/sh
-cc -Wall -Wextra -g $1 -o main main.c
-leaks -atExit -- ./main
+#!/bin/bash
+if [ "$1" = "debug" ]; then
+    cc -Wall -Wextra -g -DDEBUG -o main main.c
+    leaks -atExit -- ./main
+else
+    cc -Wall -Wextra -o main main.c
+    ./main
+fi

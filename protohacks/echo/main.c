@@ -17,6 +17,16 @@
 #define NDBG 0
 #endif
 
+#define SCOPE(body, end) \
+    do                   \
+    {                    \
+        body;            \
+    _end:                \
+        end;             \
+    } while (0)
+
+#define RET goto _end
+
 #define ALLOC(sz) malloc(sz)
 #define REALLOC(ptr, sz) realloc(ptr, sz)
 #define FREE(ptr) free(ptr)
@@ -38,7 +48,8 @@ vb_create_darray(size_t cap)
     return res;
 }
 
-void vb_destroy_darray(struct vb_darray *darray)
+void
+vb_destroy_darray(struct vb_darray *darray)
 {
     assert(darray && darray->ptr && "null ptrs");
     FREE(darray->ptr);
@@ -46,7 +57,8 @@ void vb_destroy_darray(struct vb_darray *darray)
     darray->cap = 0;
 }
 
-void vb_darray_push(struct vb_darray *darray, const char *ptr, size_t len)
+void
+vb_darray_push(struct vb_darray *darray, const char *ptr, size_t len)
 {
     assert(darray && darray->ptr && "nulls ptrs");
 
@@ -64,13 +76,14 @@ void vb_darray_push(struct vb_darray *darray, const char *ptr, size_t len)
     darray->len += len;
 }
 
-int listen_tcp(int *result)
+int 
+vb_listen_tcp(int *result)
 {
     int sfd = socket(PF_INET, SOCK_STREAM, 0);
     if (sfd == -1)
         return -1;
 
-    char reuse_addr = 1;
+    int reuse_addr = 1;
     if (setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr)) != 0)
         return -1;
 
@@ -94,12 +107,41 @@ int listen_tcp(int *result)
     return 0;
 }
 
-int main()
+int
+vb_recv_tcp(int fd, struct vb_darray *darray)
+{
+    char buff[0x100];
+    while (1)
+    {
+        ssize_t n = recv(fd, buff, sizeof(buff), 0);
+        if (n <= 0)
+            return n;
+        vb_darray_push(darray, buff, n);
+    }
+}
+
+size_t
+vb_send_tcp(int fd, struct vb_darray *darray)
+{
+    char *send_ptr = darray->ptr;
+    size_t send_len = darray->len;
+    while (1)
+    {
+        ssize_t n = send(fd, send_ptr, send_len, 0);
+        if (n <= 0)
+            return send_len;
+        send_ptr += n;
+        send_len -= n;
+    }
+}
+
+int
+main()
 {
     int sfd;
-    if (listen_tcp(&sfd) != 0)
+    if (vb_listen_tcp(&sfd) != 0)
     {
-        perror("listen_tcp");
+        perror("vb_listen_tcp");
         return 1;
     }
 
@@ -108,60 +150,24 @@ int main()
         struct sockaddr caddr;
         socklen_t caddr_len;
         int cfd = accept(sfd, &caddr, &caddr_len);
-
-        char buff[0x100];
         struct vb_darray darray = vb_create_darray(0x100);
-        char *send_ptr;
-        size_t send_len;
-        char err = 0;
 
-        // recv
-        while (1)
+        SCOPE(
         {
-            ssize_t n = recv(cfd, buff, sizeof(buff), 0);
-            if (n <= 0)
+            if (vb_recv_tcp(cfd, &darray) != 0)
             {
-                if (n == -1)
-                {
-                    err = 1;
-                }
-                break;
+                perror("recv");
+                RET;
             }
-            vb_darray_push(&darray, buff, n);
-        }
-        if (err)
-        {
-            perror("recv");
-            goto end;
-        }
-
-        // send
-        send_ptr = darray.ptr;
-        send_len = darray.len;
-        while (1)
-        {
-            ssize_t n = send(cfd, send_ptr, send_len, 0);
-            if (n <= 0)
+            if (vb_send_tcp(cfd, &darray) != 0)
             {
-                if (n == -1)
-                {
-                    err = 1;
-                }
-                break;
+                perror("send");
             }
-            send_ptr += n;
-            send_len -= n;
-        }
-        if (err == 1)
+        },
         {
-            perror("send");
-            goto end;
-        }
-        assert(send_len == 0 && "sent != recvd");
-
-    end:
-        vb_destroy_darray(&darray);
-        close(cfd);
+            vb_destroy_darray(&darray);
+            close(cfd);
+        });
 
     } while (NDBG);
 
