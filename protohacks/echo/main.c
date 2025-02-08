@@ -6,8 +6,11 @@
 #include <unistd.h>
 #include <errno.h>
 #include <assert.h>
+#include <poll.h>
+#include <fcntl.h>
 
 #define PORT "4200"
+#define BACKLOG 10
 
 #ifndef DEBUG
 #define DBG 0
@@ -17,6 +20,7 @@
 #define NDBG 0
 #endif
 
+#ifndef SCOPE
 #define SCOPE(body, end) \
     do                   \
     {                    \
@@ -24,8 +28,8 @@
     _end:                \
         end;             \
     } while (0)
-
 #define RET goto _end
+#endif
 
 #define ALLOC(sz) malloc(sz)
 #define REALLOC(ptr, sz) realloc(ptr, sz)
@@ -33,7 +37,7 @@
 
 struct vb_darray
 {
-    char *ptr;
+    char   *ptr;
     size_t len;
     size_t cap;
 };
@@ -60,7 +64,8 @@ vb_destroy_darray(struct vb_darray *darray)
 void
 vb_darray_push(struct vb_darray *darray, const char *ptr, size_t len)
 {
-    assert(darray && darray->ptr && "nulls ptrs");
+    if (darray == NULL || darray->cap == 0)
+        *darray = vb_create_darray(len * 2);
 
     if (darray->len + len > darray->cap)
     {
@@ -70,14 +75,12 @@ vb_darray_push(struct vb_darray *darray, const char *ptr, size_t len)
     }
 
     char *dst = darray->ptr + darray->len;
-    for (size_t i = 0; i < len; ++i)
-        *dst++ = *ptr++;
-
+    memcpy(dst, ptr, len);
     darray->len += len;
 }
 
 int 
-vb_listen_tcp(int *result)
+vb_listen_tcp(const char *port, int backlog, int *result)
 {
     int sfd = socket(PF_INET, SOCK_STREAM, 0);
     if (sfd == -1)
@@ -92,16 +95,15 @@ vb_listen_tcp(int *result)
     hints.ai_family = PF_INET;
     hints.ai_socktype = SOCK_STREAM;
     struct addrinfo *addr;
-    if (getaddrinfo("127.0.0.1", PORT, &hints, &addr) != 0)
+    if (getaddrinfo("127.0.0.1", port, &hints, &addr) != 0)
         return -1;
 
     if (bind(sfd, addr->ai_addr, addr->ai_addrlen) != 0)
         return -1;
     freeaddrinfo(addr);
 
-    if (listen(sfd, 10) != 0)
+    if (listen(sfd, backlog) != 0)
         return -1;
-    printf("listening on port %s\n", PORT);
 
     *result = sfd;
     return 0;
@@ -136,37 +138,77 @@ vb_send_tcp(int fd, struct vb_darray *darray)
 }
 
 int
+vb_socket_nonblocking(int fd)
+{
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags == -1)
+        return -1;
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1)
+        return -1;
+    return 0;
+}
+
+int
 main()
 {
     int sfd;
-    if (vb_listen_tcp(&sfd) != 0)
+    if (vb_listen_tcp(PORT, BACKLOG, &sfd) != 0)
     {
         perror("vb_listen_tcp");
         return 1;
     }
+    printf("listening on port %s\n", PORT);
+
+    int fds[BACKLOG + 1];
+    memset(fds, 0, sizeof(fds));
+    size_t fds_len = 0;
+    fds[fds_len++] = sfd;
 
     do
     {
         struct sockaddr caddr;
         socklen_t caddr_len;
-        int cfd = accept(sfd, &caddr, &caddr_len);
-        struct vb_darray darray = vb_create_darray(0x100);
+        int cfd = 0;
+        struct vb_darray darray;
+        darray.cap = 0;
 
         SCOPE(
         {
-            if (vb_recv_tcp(cfd, &darray) != 0)
+            cfd = accept(sfd, &caddr, &caddr_len);
+            if (vb_socket_nonblocking(cfd) != 0)
             {
-                perror("recv");
+                perror("vb_socket_nonblocking");
                 RET;
             }
-            if (vb_send_tcp(cfd, &darray) != 0)
+
+            if (vb_recv_tcp(cfd, &darray) != 0)
             {
-                perror("send");
+                switch (errno)
+                {
+                    #if EAGAIN != EWOULDBLOCK
+                    case EAGAIN:
+                    case EWOULDBLOCK:
+                    #else
+                    case EWOULDBLOCK:
+                    #endif
+                    {
+                        perror("todo nbio");
+                        RET; 
+                    }
+                    default:
+                    {
+                        perror("recv");
+                        RET;
+                    }
+                }
             }
+            if (vb_send_tcp(cfd, &darray) != 0)
+                perror("send");
         },
         {
-            vb_destroy_darray(&darray);
             close(cfd);
+            if (darray.cap > 0) {}
+                vb_destroy_darray(&darray);
         });
 
     } while (NDBG);
