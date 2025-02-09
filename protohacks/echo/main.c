@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <netdb.h>
-#include <string.h>
 #include <unistd.h>
 #include <errno.h>
 #include <assert.h>
@@ -10,7 +9,7 @@
 #include <fcntl.h>
 
 #define PORT "4200"
-#define BACKLOG 10
+#define BACKLOG 128
 
 #ifndef DEBUG
 #define DBG 0
@@ -20,24 +19,13 @@
 #define NDBG 0
 #endif
 
-#ifndef SCOPE
-#define SCOPE(body, end) \
-    do                   \
-    {                    \
-        body;            \
-    _end:                \
-        end;             \
-    } while (0)
-#define RET goto _end
-#endif
-
 #define ALLOC(sz) malloc(sz)
 #define REALLOC(ptr, sz) realloc(ptr, sz)
 #define FREE(ptr) free(ptr)
 
 struct vb_darray
 {
-    char   *ptr;
+    char *ptr;
     size_t len;
     size_t cap;
 };
@@ -52,17 +40,23 @@ vb_create_darray(size_t cap)
     return res;
 }
 
-void
-vb_destroy_darray(struct vb_darray *darray)
+void vb_destroy_darray(struct vb_darray *darray)
 {
-    assert(darray && darray->ptr && "null ptrs");
+    if (darray == NULL || darray->cap == 0)
+        return;
     FREE(darray->ptr);
     darray->len = 0;
     darray->cap = 0;
 }
 
-void
-vb_darray_push(struct vb_darray *darray, const char *ptr, size_t len)
+void vb_reset_darray(struct vb_darray *darray)
+{
+    if (darray == NULL || darray->cap == 0)
+        return;
+    darray->len = 0;
+}
+
+void vb_darray_push(struct vb_darray *darray, const char *ptr, size_t len)
 {
     if (darray == NULL || darray->cap == 0)
         *darray = vb_create_darray(len * 2);
@@ -75,12 +69,13 @@ vb_darray_push(struct vb_darray *darray, const char *ptr, size_t len)
     }
 
     char *dst = darray->ptr + darray->len;
-    memcpy(dst, ptr, len);
+    for (size_t i = 0; i < len; ++i)
+        dst[i] = ptr[i];
+
     darray->len += len;
 }
 
-int 
-vb_listen_tcp(const char *port, int backlog, int *result)
+int vb_listen_tcp(const char *port, int backlog, int *result)
 {
     int sfd = socket(PF_INET, SOCK_STREAM, 0);
     if (sfd == -1)
@@ -90,8 +85,7 @@ vb_listen_tcp(const char *port, int backlog, int *result)
     if (setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr)) != 0)
         return -1;
 
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
+    struct addrinfo hints = {0};
     hints.ai_family = PF_INET;
     hints.ai_socktype = SOCK_STREAM;
     struct addrinfo *addr;
@@ -109,10 +103,9 @@ vb_listen_tcp(const char *port, int backlog, int *result)
     return 0;
 }
 
-int
-vb_recv_tcp(int fd, struct vb_darray *darray)
+int vb_recv_tcp(int fd, struct vb_darray *darray)
 {
-    char buff[0x100];
+    char buff[0x100] = {0};
     while (1)
     {
         ssize_t n = recv(fd, buff, sizeof(buff), 0);
@@ -137,8 +130,16 @@ vb_send_tcp(int fd, struct vb_darray *darray)
     }
 }
 
-int
-vb_socket_nonblocking(int fd)
+int vb_echo_tcp(int fd)
+{
+    char buff[0x100] = {0};
+    ssize_t n = recv(fd, buff, sizeof(buff), 0);
+    if (n > 0)
+        send(fd, buff, n, 0);
+    return n;
+}
+
+int vb_socket_nonblocking(int fd)
 {
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags == -1)
@@ -148,68 +149,93 @@ vb_socket_nonblocking(int fd)
     return 0;
 }
 
-int
-main()
+void vb_remove(int tgt, int *src, size_t *src_len)
+{
+    size_t len = *src_len;
+    for (size_t i = 0; i < len; ++i)
+        if (src[i] == tgt)
+        {
+            for (size_t j = i; j < len - 1; ++j)
+                src[j] = src[j + 1];
+            *src_len = len - 1;
+            break;
+        }
+}
+
+int main()
 {
     int sfd;
+
     if (vb_listen_tcp(PORT, BACKLOG, &sfd) != 0)
     {
         perror("vb_listen_tcp");
         return 1;
     }
+
+    if (vb_socket_nonblocking(sfd) != 0)
+    {
+        perror("vb_socket_nonblocking");
+        return 1;
+    }
+
     printf("listening on port %s\n", PORT);
 
-    int fds[BACKLOG + 1];
-    memset(fds, 0, sizeof(fds));
-    size_t fds_len = 0;
-    fds[fds_len++] = sfd;
+    int cfds[BACKLOG] = {0};
+    size_t cfds_len = 0;
 
     do
     {
         struct sockaddr caddr;
         socklen_t caddr_len;
         int cfd = 0;
-        struct vb_darray darray;
-        darray.cap = 0;
 
-        SCOPE(
+        cfd = accept(sfd, &caddr, &caddr_len);
+        if (cfd == -1)
         {
-            cfd = accept(sfd, &caddr, &caddr_len);
-            if (vb_socket_nonblocking(cfd) != 0)
+            if (errno == EWOULDBLOCK)
             {
-                perror("vb_socket_nonblocking");
-                RET;
-            }
-
-            if (vb_recv_tcp(cfd, &darray) != 0)
-            {
-                switch (errno)
+                for (size_t i = 0; i < cfds_len; ++i)
                 {
-                    #if EAGAIN != EWOULDBLOCK
-                    case EAGAIN:
-                    case EWOULDBLOCK:
-                    #else
-                    case EWOULDBLOCK:
-                    #endif
+                    cfd = cfds[i];
+
+                    int n = vb_echo_tcp(cfd);
+                    if (n < 0)
                     {
-                        perror("todo nbio");
-                        RET; 
-                    }
-                    default:
-                    {
+                        if (errno == EWOULDBLOCK)
+                            continue;
+
                         perror("recv");
-                        RET;
+
+                        close(cfd);
+                        vb_remove(cfd, cfds, &cfds_len);
+                        break;
+                    }
+                    else
+                    {
+                        if (n == 0)
+                        {
+                            close(cfd);
+                            vb_remove(cfd, cfds, &cfds_len);
+                        }
+                        break;
                     }
                 }
             }
-            if (vb_send_tcp(cfd, &darray) != 0)
-                perror("send");
-        },
+            else
+            {
+                perror("accept");
+                continue;
+            }
+        }
+        else
         {
-            close(cfd);
-            if (darray.cap > 0) {}
-                vb_destroy_darray(&darray);
-        });
+            if (vb_socket_nonblocking(cfd) != 0)
+            {
+                perror("vb_socket_nonblocking");
+                close(cfd);
+            }
+            cfds[cfds_len++] = cfd;
+        }
 
     } while (NDBG);
 
