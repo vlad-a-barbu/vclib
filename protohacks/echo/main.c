@@ -89,7 +89,7 @@ int vb_listen_tcp(const char *port, int backlog, int *result)
     hints.ai_family = PF_INET;
     hints.ai_socktype = SOCK_STREAM;
     struct addrinfo *addr;
-    if (getaddrinfo("127.0.0.1", port, &hints, &addr) != 0)
+    if (getaddrinfo("0.0.0.0", port, &hints, &addr) != 0)
         return -1;
 
     if (bind(sfd, addr->ai_addr, addr->ai_addrlen) != 0)
@@ -187,9 +187,8 @@ int main()
     {
         struct sockaddr caddr;
         socklen_t caddr_len;
-        int cfd = 0;
+        int cfd = accept(sfd, &caddr, &caddr_len);
 
-        cfd = accept(sfd, &caddr, &caddr_len);
         if (cfd == -1)
         {
             if (errno == EWOULDBLOCK)
@@ -233,6 +232,7 @@ int main()
             {
                 perror("vb_socket_nonblocking");
                 close(cfd);
+                continue;
             }
             cfds[cfds_len++] = cfd;
         }
