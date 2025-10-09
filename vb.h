@@ -1,3 +1,6 @@
+#ifndef VB_H
+#define VB_H
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -349,5 +352,115 @@ int listen_tcp(const char *port, int backlog) {
 }
 
 
-/* END SOCKET */
+/* BEGIN FORMATTERS */
 
+typedef struct {
+	size_t ptr;
+	size_t len;
+} View;
+
+typedef struct {
+	View *buffer;
+	size_t size;
+	size_t capacity;
+} ViewArray;
+
+ViewArray view_array_init(size_t capacity, Arena *arena) {
+	ViewArray array;
+	memset(&array, 0, sizeof(ViewArray));
+	View *buffer = (View *)arena_alloc(arena, capacity * sizeof(View));
+	assert(buffer);
+	array.buffer = buffer;
+	array.capacity = capacity;
+	return array;
+}
+
+void view_array_add(ViewArray *array, View view, Arena *arena) {
+	if (array->size == array->capacity) {
+		array->capacity *= 2;
+		View *buffer = (View *)arena_resize_last(arena, array->capacity * sizeof(View));
+		assert(buffer);
+		array->buffer = buffer;
+	}
+	array->buffer[array->size++] = view;
+}
+
+static ViewArray get_lines_starting_with_spaces(String8 content, size_t estimated_line_count, Arena *arena) {
+	int line_starts_with_spaces = -1;
+	ViewArray views = view_array_init(estimated_line_count, arena);
+	View view;
+	memset(&view, 0, sizeof(View));
+
+	for (size_t i = 0; i < content.len; ++i) {
+		char c = content.ptr[i];
+		if (c == '\n') {
+			line_starts_with_spaces = -1;
+			continue;
+		}
+		if (line_starts_with_spaces == -1) {
+			line_starts_with_spaces = c == ' ';
+		}
+		if (!line_starts_with_spaces) {
+			continue;
+		}
+		if (c == ' ') {
+			if (!view.ptr) {
+				view.ptr = i;
+				view.len = 0;
+			}
+			view.len += 1;
+		} else {
+			line_starts_with_spaces = 0;
+			if (view.len) {
+				view_array_add(&views, view, arena);
+			}
+			memset(&view, 0, sizeof(View));
+		}
+	}
+
+	if (view.len) {
+		view_array_add(&views, view, arena);
+	}
+
+	return views;
+}
+
+void format_tabs_over_spaces(const char *srcpath, const char *dstpath, size_t estimated_line_count, int tabwidth, Arena *arena) {
+	ArenaSave save = arena_save(arena);
+	String8 content = read_entire_file(srcpath, arena);
+	assert(content.ptr);
+	ViewArray views = get_lines_starting_with_spaces(content, estimated_line_count, arena);
+
+	char *buffer = arena_alloc(arena, content.len);
+	size_t wptr = 0;
+	size_t rptr = 0;
+
+	for (size_t i = 0; i < views.size; ++i) {
+		View view = views.buffer[i];
+		assert(view.len % tabwidth == 0);
+		int write_length = view.ptr - rptr;
+		size_t n = snprintf(&buffer[wptr], content.len - wptr, "%.*s", write_length, &content.ptr[rptr]);
+		assert(n >= 0 && n < content.len - wptr);
+		wptr += n;
+		int ntabs = view.len / tabwidth;
+		memset(&buffer[wptr], '\t', ntabs);
+		wptr += ntabs;
+		rptr = view.ptr + view.len;
+	}
+
+	int write_length = content.len - rptr;
+	size_t n = snprintf(&buffer[wptr], content.len - wptr, "%.*s", write_length, &content.ptr[rptr]);
+	assert(n >= 0 && n < content.len - wptr);
+	wptr += n;
+
+	FILE *file = fopen(dstpath, "wb");
+	assert(file);
+	size_t nw = fwrite(buffer, sizeof(char), wptr, file);
+	assert(nw == wptr);
+	fclose(file);
+	arena_restore(arena, save);
+}
+
+/* END FORMATTERS */
+
+#endif
