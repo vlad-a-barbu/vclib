@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-
-cc -g -std=c99 -Wall -Wextra -pedantic main.c -o main
-

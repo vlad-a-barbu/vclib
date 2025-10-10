@@ -12,13 +12,13 @@
 #include <unistd.h>
 
 #ifdef _WIN32
-    #if defined(__clang__)
-        #pragma clang diagnostic push
-        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    #elif defined(_MSC_VER)
-        #pragma warning(push)
-        #pragma warning(disable: 4996)
-    #endif
+	#if defined(__clang__)
+		#pragma clang diagnostic push
+		#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+	#elif defined(_MSC_VER)
+		#pragma warning(push)
+		#pragma warning(disable: 4996)
+	#endif
 #endif
 
 /* BEGIN ARENA */
@@ -218,19 +218,19 @@ const char *read_entire_file_cstring(const char *path, Arena *arena, size_t *out
 /* BEGIN LOG */
 
 #ifdef _WIN32
-    #include <windows.h>
-    typedef CRITICAL_SECTION mutex_t;
-    #define mutex_init(m) InitializeCriticalSection(m)
-    #define mutex_destroy(m) DeleteCriticalSection(m)
-    #define mutex_lock(m) EnterCriticalSection(m)
-    #define mutex_unlock(m) LeaveCriticalSection(m)
+	#include <windows.h>
+	typedef CRITICAL_SECTION mutex_t;
+	#define mutex_init(m) InitializeCriticalSection(m)
+	#define mutex_destroy(m) DeleteCriticalSection(m)
+	#define mutex_lock(m) EnterCriticalSection(m)
+	#define mutex_unlock(m) LeaveCriticalSection(m)
 #else
-    #include <pthread.h>
-    typedef pthread_mutex_t mutex_t;
-    #define mutex_init(m) pthread_mutex_init(m, NULL)
-    #define mutex_destroy(m) pthread_mutex_destroy(m)
-    #define mutex_lock(m) pthread_mutex_lock(m)
-    #define mutex_unlock(m) pthread_mutex_unlock(m)
+	#include <pthread.h>
+	typedef pthread_mutex_t mutex_t;
+	#define mutex_init(m) pthread_mutex_init(m, NULL)
+	#define mutex_destroy(m) pthread_mutex_destroy(m)
+	#define mutex_lock(m) pthread_mutex_lock(m)
+	#define mutex_unlock(m) pthread_mutex_unlock(m)
 #endif
 
 #ifndef LOG_BUFFER_SIZE
@@ -244,45 +244,42 @@ static char log_buffer[LOG_BUFFER_SIZE];
 static char log_msg_buffer[LOG_MSG_BUFFER_SIZE];
 
 static struct {
-    FILE *file;
-    char *buffer;
-    size_t buffer_size;
-    char *msg_buffer;
-    size_t msg_buffer_size;
-    mutex_t lock;
-    int initialized;
+	FILE *file;
+	char *buffer;
+	size_t buffer_size;
+	char *msg_buffer;
+	size_t msg_buffer_size;
+	mutex_t lock;
+	int initialized;
 } logger;
 
 void
 logger_init(FILE *file) {
-    assert(file);
-    logger.file = file;
-    logger.buffer = log_buffer;
-    logger.buffer_size = LOG_BUFFER_SIZE;
-    logger.msg_buffer = log_msg_buffer;
-    logger.msg_buffer_size = LOG_MSG_BUFFER_SIZE;
-    mutex_init(&logger.lock);
-    logger.initialized = 1;
+	assert(file);
+	logger.file = file;
+	logger.buffer = log_buffer;
+	logger.buffer_size = LOG_BUFFER_SIZE;
+	logger.msg_buffer = log_msg_buffer;
+	logger.msg_buffer_size = LOG_MSG_BUFFER_SIZE;
+	mutex_init(&logger.lock);
+	logger.initialized = 1;
 }
 
 static void
 logger_write(const char *tag, const char *file, const char *function, int line_number) {
-    size_t write_len;
+	size_t write_len;
 
-    assert(logger.initialized);
-    
-    mutex_lock(&logger.lock);
+	assert(logger.initialized);
+		 mutex_lock(&logger.lock);
 
-    write_len = snprintf(logger.buffer, logger.buffer_size,
-            "[%s] %s | %s L%d | %s\n",
-            tag, file, function, line_number, logger.msg_buffer);
-    
-    assert(write_len >= 0 && write_len < logger.buffer_size);
-    assert(write_len == fwrite(logger.buffer, sizeof(char), write_len, logger.file));
+	write_len = snprintf(logger.buffer, logger.buffer_size,
+			"[%s] %s | %s L%d | %s\n",
+			tag, file, function, line_number, logger.msg_buffer);
+		 assert(write_len >= 0 && write_len < logger.buffer_size);
+	assert(write_len == fwrite(logger.buffer, sizeof(char), write_len, logger.file));
 
-    fflush(logger.file);
-    
-    mutex_unlock(&logger.lock);
+	fflush(logger.file);
+		 mutex_unlock(&logger.lock);
 }
 
 #define log(tag, message) 											\
@@ -401,12 +398,12 @@ static ViewArray get_lines_starting_with_spaces(String8 content, size_t estimate
 			line_starts_with_spaces = c == ' ';
 		}
 		if (!line_starts_with_spaces) {
+			memset(&view, 0, sizeof(View));
 			continue;
 		}
 		if (c == ' ') {
 			if (!view.ptr) {
 				view.ptr = i;
-				view.len = 0;
 			}
 			view.len += 1;
 		} else {
@@ -430,6 +427,7 @@ void format_tabs_over_spaces(const char *srcpath, const char *dstpath, size_t es
 	String8 content = read_entire_file(srcpath, arena);
 	assert(content.ptr);
 	ViewArray views = get_lines_starting_with_spaces(content, estimated_line_count, arena);
+	if (views.size == 0) return;
 
 	char *buffer = arena_alloc(arena, content.len);
 	size_t wptr = 0;
