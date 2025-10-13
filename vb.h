@@ -6,11 +6,6 @@
 #include <string.h>
 #include <assert.h>
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <unistd.h>
-
 #ifdef _WIN32
 	#if defined(__clang__)
 		#pragma clang diagnostic push
@@ -140,6 +135,29 @@ typedef struct {
 	char *ptr;
 	size_t len;
 } String8;
+
+String8 string8_create(const char *cstring)
+{
+	String8 str;
+	char *buff;
+
+	memset(&str, 0, sizeof(str));
+	str.len = strlen(cstring);
+
+	buff = malloc(str.len);
+	assert(buff);
+
+	str.ptr = buff;
+	memcpy(str.ptr, cstring, str.len);
+
+	return str;
+}
+
+void string8_destroy(String8 *string)
+{
+	free(string->ptr);
+	memset(string, 0, sizeof(*string));
+}
  
 String8 read_entire_file(const char *path, Arena *arena) {
 	String8 content;
@@ -310,6 +328,13 @@ logger_write(const char *tag, const char *file, const char *function, int line_n
 
 /* BEGIN SOCKET */
 
+#ifndef _WIN32
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
+
 int listen_tcp(const char *port, int backlog) {
 	int s, on;
 	struct addrinfo hints, *res;
@@ -348,6 +373,7 @@ int listen_tcp(const char *port, int backlog) {
 	return s;
 }
 
+#endif
 
 /* BEGIN FORMATTERS */
 
