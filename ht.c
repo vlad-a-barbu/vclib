@@ -1,14 +1,9 @@
 #include "vb.h"
 
 static int
-KeysEq(String8 key1, String8 key2)
-{
-	if (key1.len != key2.len)
-	{
-		return 0;
-	}
-
-	return memcmp(key1.ptr, key2.ptr, key1.len) == 0;
+String8Eq(String8 key1, String8 key2) {
+    return (key1.len == key2.len) && 
+           (memcmp(key1.ptr, key2.ptr, key1.len) == 0);
 }
 
 static void *
@@ -75,7 +70,7 @@ HashTable_Bucket_Add(HashTable_Bucket *bucket, String8 key, void *value, size_t 
 
 	for (i = 0; i < bucket->size; ++i)
 	{
-		if (KeysEq(bucket->keys[i], key))
+		if (String8Eq(bucket->keys[i], key))
 		{
 			memcpy(nth_no_bounds_checking(bucket->values, i, value_size),
 				value,
@@ -101,8 +96,10 @@ HashTable_Bucket_Add(HashTable_Bucket *bucket, String8 key, void *value, size_t 
 	key_ptr = arena_alloc(&bucket->arena_keys_ptrs, key.len);
 	assert(key_ptr);
 	memcpy(key_ptr, key.ptr, key.len);
+
 	key.ptr = key_ptr;
 	memcpy(&bucket->keys[bucket->size], &key, sizeof(key));
+
 	memcpy(nth_no_bounds_checking(bucket->values, bucket->size, value_size),
 		value,
 		value_size);
@@ -119,7 +116,7 @@ HashTable_Bucket_Search(HashTable_Bucket *bucket, String8 search_key)
 	for (i = 0; i < bucket->size; ++i)
 	{
 		current_key = bucket->keys[i];
-		if (KeysEq(current_key, search_key))
+		if (String8Eq(current_key, search_key))
 		{
 			return i;
 		}
@@ -172,26 +169,25 @@ HashTable_Create(size_t initial_bucket_count,
 	while (hash_table.buckets.size < initial_bucket_count)
 	{
 		hash_table.buckets.ptr[hash_table.buckets.size++] = HashTable_Bucket_Create(bucket_max_capacity,
-									   		    bucket_initial_capacity,
-											    max_key_length,
-											    value_size,
-											    &arena);
+												bucket_initial_capacity,
+												max_key_length,
+												value_size,
+												&arena);
 	}
 
 	return hash_table;
 }
 
 int
-HashTable_Set(HashTable *hash_table, char *key, void *value)
+HashTable_Set(HashTable *hash_table, char *key, void *value, Arena *arena)
 {
 	String8 key_str;
 	size_t bucket_id;
 	HashTable_Bucket *bucket;
 
-	key_str = string8_create(key);
+	key_str = string8_create(key, arena);
 	if (key_str.len > hash_table->max_key_length)
 	{
-		string8_destroy(&key_str);
 		return 0;
 	}
 
@@ -200,22 +196,20 @@ HashTable_Set(HashTable *hash_table, char *key, void *value)
 
 	HashTable_Bucket_Add(bucket, key_str, value, hash_table->value_size);
 
-	string8_destroy(&key_str);
 	return 1;
 }
 
 int
-HashTable_Get(HashTable *hash_table, char *key, void *out_value)
+HashTable_Get(HashTable *hash_table, char *key, void *out_value, Arena *arena)
 {
 	String8 key_str;
 	size_t bucket_id;
 	HashTable_Bucket bucket;
 	size_t elem_id;
 
-	key_str = string8_create(key);
+	key_str = string8_create(key, arena);
 	if (key_str.len > hash_table->max_key_length)
 	{
-		string8_destroy(&key_str);
 		return 0;
 	}
 
@@ -225,7 +219,6 @@ HashTable_Get(HashTable *hash_table, char *key, void *out_value)
 	elem_id = HashTable_Bucket_Search(&bucket, key_str);
 	if (elem_id == bucket.size)
 	{
-		string8_destroy(&key_str);
 		return 0;
 	}
 	
@@ -236,16 +229,27 @@ HashTable_Get(HashTable *hash_table, char *key, void *out_value)
 			hash_table->value_size);
 	}
 
-	string8_destroy(&key_str);
 	return 1;
 }
 
-#define BUFFER_SIZE (10 * 1024 * 1024)
+size_t FNV1a_Hash(String8 key) {
+	size_t hash = 0xcbf29ce484222325ULL;  // FNV offset basis
+	for (size_t i = 0; i < key.len; i++) {
+		hash ^= (unsigned char)key.ptr[i];
+		hash *= 0x100000001b3ULL;  // FNV prime
+	}
+	return hash;
+}
+
+#define TMP_BUFFER_SIZE 0x1000
+static char tmp_buffer[TMP_BUFFER_SIZE];
+
+#define BUFFER_SIZE (100 * 1024 * 1024)
 static char buffer[BUFFER_SIZE];
 
-#define INITIAL_BUCKET_COUNT 10
+#define INITIAL_BUCKET_COUNT 10000
 #define MAX_KEY_LENGTH 20
-#define BUCKET_MAX_CAPACITY 20
+#define BUCKET_MAX_CAPACITY 160
 #define BUCKET_INITIAL_CAPACITY 5
 
 typedef struct {
@@ -253,24 +257,16 @@ typedef struct {
 	float y;
 } Point;
 
-size_t FNV1a_Hash(String8 key) {
-    size_t hash = 0xcbf29ce484222325ULL;  // FNV offset basis
-    for (size_t i = 0; i < key.len; i++) {
-        hash ^= (unsigned char)key.ptr[i];
-        hash *= 0x100000001b3ULL;  // FNV prime
-    }
-    return hash;
-}
-
 int
 main(void)
 {
+	Arena tmp_arena;
 	HashTable hash_table;
-	Point p1, p2, p3;
+	Point p;
+	size_t i;
+	char ps[10];
 
-	p1.x = p1.y = 1;
-	p2.x = p2.y = 2;
-	p3.x = p3.y = 3;
+	tmp_arena = arena_init(tmp_buffer, TMP_BUFFER_SIZE);
 
 	hash_table = HashTable_Create(INITIAL_BUCKET_COUNT,
 					FNV1a_Hash,
@@ -280,14 +276,19 @@ main(void)
 					BUCKET_MAX_CAPACITY,
 					BUCKET_INITIAL_CAPACITY);
 
-	HashTable_Set(&hash_table, "p1", &p1);
-	HashTable_Set(&hash_table, "p2", &p2);
-	HashTable_Set(&hash_table, "p3", &p3);
-
-	assert(HashTable_Get(&hash_table, "p1", NULL));
-	assert(HashTable_Get(&hash_table, "p2", NULL));
-	assert(HashTable_Get(&hash_table, "p3", NULL));
+	for (i = 0; i < 1000000; ++i)
+	{
+		p.x = p.y = i % 10;
+		sprintf(ps, "p%zu", i);
+		HashTable_Set(&hash_table, ps, &p, &tmp_arena);
+	}
+	
+	for (i = 0; i < 1000000; ++i)
+	{
+		p.x = p.y = i % 10;
+		sprintf(ps, "p%zu", i);
+		assert(HashTable_Get(&hash_table, ps, NULL, &tmp_arena));
+	}
 
 	return 0;
 }
-

@@ -127,6 +127,11 @@ void arena_restore(Arena *arena, ArenaSave save) {
 	arena->previous_offset = save.previous_offset;
 }
 
+void arena_reset(Arena *arena) {
+	memset(arena->buffer, 0, arena->buffer_size);
+	arena->current_offset = arena->previous_offset = 0;
+}
+
 /* END ARENA */
 
 /* BEGIN IO */
@@ -136,7 +141,7 @@ typedef struct {
 	size_t len;
 } String8;
 
-String8 string8_create(const char *cstring)
+String8 string8_create(const char *cstring, Arena *arena)
 {
 	String8 str;
 	char *buff;
@@ -144,21 +149,19 @@ String8 string8_create(const char *cstring)
 	memset(&str, 0, sizeof(str));
 	str.len = strlen(cstring);
 
-	buff = malloc(str.len);
-	assert(buff);
-
+	buff = arena_alloc(arena, str.len);
+	if (!buff) {
+		arena_reset(arena);
+		buff = arena_alloc(arena, str.len);
+		assert(buff);
+	}
+	
 	str.ptr = buff;
 	memcpy(str.ptr, cstring, str.len);
 
 	return str;
 }
 
-void string8_destroy(String8 *string)
-{
-	free(string->ptr);
-	memset(string, 0, sizeof(*string));
-}
- 
 String8 read_entire_file(const char *path, Arena *arena) {
 	String8 content;
 	FILE *file;
