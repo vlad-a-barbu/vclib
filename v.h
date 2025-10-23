@@ -1,5 +1,5 @@
-#ifndef VB_H
-#define VB_H
+#ifndef V_H
+#define V_H
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -490,4 +490,4 @@ void format_tabs_over_spaces(const char *srcpath, const char *dstpath, size_t es
 
 /* END FORMATTERS */
 
-#endif
+#endif /* V_H */
