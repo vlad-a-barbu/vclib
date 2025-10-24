@@ -1,4 +1,4 @@
-#include "vb.h"
+#include "v.h"
 
 static int
 String8Eq(String8 key1, String8 key2) {
@@ -280,6 +280,9 @@ main(void)
 	{
 		p.x = p.y = i % 10;
 		sprintf(ps, "p%zu", i);
+		if (tmp_arena.size + MAX_KEY_LENGTH > tmp_arena.capacity) {
+			arena_reset(&tmp_arena);
+		}
 		HashTable_Set(&hash_table, ps, &p, &tmp_arena);
 	}
 	
@@ -287,6 +290,9 @@ main(void)
 	{
 		p.x = p.y = i % 10;
 		sprintf(ps, "p%zu", i);
+		if (tmp_arena.size + MAX_KEY_LENGTH > tmp_arena.capacity) {
+			arena_reset(&tmp_arena);
+		}
 		assert(HashTable_Get(&hash_table, ps, NULL, &tmp_arena));
 	}
 

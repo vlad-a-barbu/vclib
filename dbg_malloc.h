@@ -31,6 +31,10 @@ static FreeAllocation *allocation_freelist_tail;
 
 static unsigned char DEADBEEF[4] = {0xDE, 0xAD, 0xBE, 0xEF};
 
+int deadbeef(void *ptr, size_t size) {
+	return memcmp(DEADBEEF, (char *)ptr + size, 4) == 0;
+}
+
 void *malloc_deadbeef(size_t size) {
 	void *ptr;
 	size_t deadbeef_size = size + 4;
@@ -46,14 +50,37 @@ void *malloc_deadbeef(size_t size) {
 	return ptr;
 }
 
-int deadbeef(void *ptr, size_t size) {
-	return memcmp(DEADBEEF, (char *)ptr + size, 4) == 0;
+void *realloc_deadbeef(Allocation *alloc, size_t size) {
+	void *ptr;
+	size_t deadbeef_size;
+	
+	assert(alloc && size && alloc->size && alloc->ptr);
+
+	if (!deadbeef(alloc->ptr, alloc->size)) {
+		printf("buffer overflow | addr %p | location %s:%d\n",
+				alloc->ptr, alloc->file, alloc->line);
+		assert(0);
+	}
+
+	deadbeef_size = size + 4;
+	assert(deadbeef_size > size);
+
+	ptr = realloc(alloc->ptr, deadbeef_size);
+	if (ptr == NULL) {
+		/* alloc->ptr remains valid but currently we crash when realloc OOMs */
+		return NULL;
+	}
+
+	memcpy((char *)ptr + size, DEADBEEF, 4);
+	return ptr;
 }
 
 void check_overflows(void) {
 	Allocation *alloc;
 	size_t i;
 	int ok = 1;
+
+	assert(allocations.cap && allocations.ptr);
 
 	for (i = 0; i < allocations.size; ++i) {
 		alloc = &allocations.ptr[i];
@@ -68,18 +95,21 @@ void check_overflows(void) {
 	assert("buffer overflow allocation sites listed above" && ok);
 }
 
-void *dbg_malloc_internal(size_t size, const char *file, int line) {
-	Allocation alloc;
-	size_t alloc_slot;
-	FreeAllocation *free_allocation;
-
+void ensure_allocations_initialized(void) {
 	if (allocations.cap == 0) {
 		assert(INITIAL_ALLOCATIONS_CAP);
 		allocations.cap = INITIAL_ALLOCATIONS_CAP;
 		allocations.ptr = malloc(allocations.cap * sizeof(Allocation));
 		assert("OOM" && allocations.ptr);
 	}
+}
 
+void *dbg_malloc_internal(size_t size, const char *file, int line) {
+	Allocation alloc;
+	size_t alloc_slot;
+	FreeAllocation *free_allocation;
+
+	ensure_allocations_initialized();
 	check_overflows();
 
 	if (allocation_freelist_head) {
@@ -114,10 +144,57 @@ void *dbg_malloc_internal(size_t size, const char *file, int line) {
 	return alloc.ptr;
 }
 
+void *dbg_realloc_internal(void *ptr, size_t size, const char *file, int line) {
+	Allocation *alloc;
+	size_t alloc_slot;
+	void *new_ptr;
+
+	if (ptr == NULL) {
+		return dbg_malloc_internal(size, file, line);
+	}
+
+	ensure_allocations_initialized();
+	check_overflows();
+
+	for (alloc_slot = 0; alloc_slot < allocations.size; ++alloc_slot) {
+		alloc = &allocations.ptr[alloc_slot];
+		if (alloc->ptr == ptr) break;
+	}
+
+	if (alloc_slot == allocations.size) {
+		printf("allocation not found | addr %p | location %s:%d\n",
+				ptr, file, line);
+		assert(0);
+	}
+
+	new_ptr = realloc_deadbeef(alloc, size);
+	if (new_ptr == NULL) {
+		printf("realloc OOM | addr %p | current size %zu | realloc size %zu | location %s:%d\n",
+				ptr, alloc->size, size, file, line);
+		assert(0);
+	}
+
+	alloc->ptr = new_ptr;
+	alloc->size = size;
+	alloc->file = file;
+	alloc->line = line;
+
+	return alloc->ptr;
+}
+
 void dbg_free_internal(void *ptr, const char *file, int line) {
 	Allocation *alloc;
 	size_t alloc_slot;
 	FreeAllocation *free_allocation;
+
+	if (ptr == NULL) {
+		printf("nullptr free | location %s:%d\n", 
+				file, line);
+		assert(0);
+	}
+
+	ensure_allocations_initialized();
+	check_overflows();
 
 	for (alloc_slot = 0; alloc_slot < allocations.size; ++alloc_slot) {
 		alloc = &allocations.ptr[alloc_slot];
@@ -180,13 +257,15 @@ void dbg_malloc_report(void) {
 #ifdef DBG_MALLOC_USE_PREFIX
 
 #define dbg_malloc(size) dbg_malloc_internal(size, __FILE__, __LINE__)
+#define dbg_realloc(ptr, size) dbg_realloc_internal(ptr, size, __FILE__, __LINE__)
 #define dbg_free(ptr) dbg_free_internal(ptr, __FILE__, __LINE__)
 
 #else
 
 #define malloc(size) dbg_malloc_internal(size, __FILE__, __LINE__)
+#define realloc(ptr, size) dbg_realloc_internal(ptr, size, __FILE__, __LINE__)
 #define free(ptr) dbg_free_internal(ptr, __FILE__, __LINE__)
 
-#endif /* OVERRIDE_MALLOC_API */
+#endif /* DBG_MALLOC_USE_PREFIX */
 
 #endif /* DBG_MALLOC_H */

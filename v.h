@@ -150,11 +150,7 @@ String8 string8_create(const char *cstring, Arena *arena)
 	str.len = strlen(cstring);
 
 	buff = arena_alloc(arena, str.len);
-	if (!buff) {
-		arena_reset(arena);
-		buff = arena_alloc(arena, str.len);
-		assert(buff);
-	}
+	assert(buff);
 	
 	str.ptr = buff;
 	memcpy(str.ptr, cstring, str.len);
@@ -303,24 +299,24 @@ logger_write(const char *tag, const char *file, const char *function, int line_n
 		 mutex_unlock(&logger.lock);
 }
 
-#define log(tag, message) 											\
-	do {													\
-		size_t write_len = snprintf(logger.msg_buffer, logger.msg_buffer_size, message); 		\
-		assert(write_len >= 0 && write_len < logger.msg_buffer_size);					\
-		logger_write(tag, __FILE__, __func__, __LINE__);						\
-	} while(0);												\
+#define log(tag, message) 																				\
+	do {																								\
+		size_t write_len = snprintf(logger.msg_buffer, logger.msg_buffer_size, message); 				\
+		assert(write_len >= 0 && write_len < logger.msg_buffer_size);									\
+		logger_write(tag, __FILE__, __func__, __LINE__);												\
+	} while(0);																							\
 
 #define log_debug(message) log("DEBUG", message)
 #define log_info(message) log("INFO", message)
 #define log_warning(message) log("WARNING", message)
 #define log_error(message) log("ERROR", message)
 
-#define logf(tag, template, ...) 										\
-	do {													\
+#define logf(tag, template, ...) 																		\
+	do {																								\
 		size_t write_len = snprintf(logger.msg_buffer, logger.msg_buffer_size, template, __VA_ARGS__); 	\
-		assert(write_len >= 0 && write_len < logger.msg_buffer_size);					\
-		logger_write(tag, __FILE__, __func__, __LINE__);						\
-	} while(0);												\
+		assert(write_len >= 0 && write_len < logger.msg_buffer_size);									\
+		logger_write(tag, __FILE__, __func__, __LINE__);												\
+	} while(0);																							\
 
 #define log_debugf(template, ...) logf("DEBUG", template, __VA_ARGS__)
 #define log_infof(template, ...) logf("INFO", template, __VA_ARGS__)
